@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#070b12">
+<title>Qazr 云端远控</title>
+<style>
+  :root{
+    --bg:#070b12; --panel:rgba(17,24,37,.82); --line:rgba(148,163,184,.16);
+    --text:#e6edf7; --muted:#8b9bb4; --green:#4ade80; --blue:#60a5fa; --red:#f87171; --amber:#fbbf24;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  body{
+    background:var(--bg);color:var(--text);min-height:100vh;
+    font-family:"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    background-image:
+      radial-gradient(680px 380px at 10% -6%, rgba(96,165,250,.18), transparent 62%),
+      radial-gradient(600px 360px at 92% 0%, rgba(74,222,128,.12), transparent 64%);
+    background-attachment:fixed;
+  }
+  .wrap{max-width:760px;margin:0 auto;padding:18px 14px 46px}
+  header{display:flex;align-items:center;gap:10px;margin:6px 0 16px}
+  header .dot{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 14px var(--green);animation:pulse 1.8s infinite}
+  header h1{font-size:17px;letter-spacing:.02em}
+  header small{margin-left:auto;color:var(--muted);font-size:11.5px}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px;backdrop-filter:blur(10px)}
+  .card h2{font-size:12px;color:var(--muted);letter-spacing:.12em;text-transform:uppercase;margin-bottom:10px;font-weight:600}
+
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  input,select{flex:1 1 140px;min-width:0;background:rgba(3,7,18,.6);border:1px solid var(--line);border-radius:9px;color:var(--text);padding:10px 12px;font-size:13px;outline:none;font-family:inherit}
+  input:focus{border-color:rgba(96,165,250,.6)}
+  button{appearance:none;border:1px solid var(--line);border-radius:9px;background:rgba(148,163,184,.1);color:var(--text);padding:10px 13px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:.18s}
+  button:active{transform:scale(.97)}
+  button.primary{background:linear-gradient(135deg,rgba(96,165,250,.95),rgba(74,222,128,.85));color:#04121f;border-color:transparent}
+  button.on{background:rgba(74,222,128,.16);border-color:rgba(74,222,128,.5);color:var(--green)}
+  button.off{background:rgba(248,113,113,.12);border-color:rgba(248,113,113,.4);color:#fecaca}
+  .grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+  .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+
+  .status{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+  .kv{background:rgba(3,7,18,.42);border:1px solid var(--line);border-radius:10px;padding:9px 11px;min-width:0}
+  .kv .k{font-size:10.5px;color:var(--muted);letter-spacing:.08em}
+  .kv .v{font-size:13.5px;font-weight:650;margin-top:3px;word-break:break-all}
+  .kv .v.green{color:var(--green)}
+  .result{margin-top:10px;padding:10px 12px;border-radius:10px;background:rgba(96,165,250,.09);border:1px solid rgba(96,165,250,.28);font-size:12.5px;color:#bfdbfe;word-break:break-all}
+
+  .mods{max-height:300px;overflow:auto;margin-top:8px;-webkit-overflow-scrolling:touch}
+  .mod{display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid rgba(148,163,184,.09)}
+  .mod:last-child{border-bottom:none}
+  .mod span{flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mod em{display:block;font-style:normal;font-size:10.5px;color:var(--muted)}
+  .mod button{padding:7px 12px;font-size:12px;min-width:62px}
+
+  .log{height:130px;overflow:auto;background:rgba(3,7,18,.55);border:1px solid var(--line);border-radius:10px;padding:10px;font:11.5px ui-monospace,Consolas,monospace;color:#9fb3c8;white-space:pre-wrap}
+  .tip{font-size:11.5px;color:var(--muted);line-height:1.7;margin-top:8px}
+  .msg{font-size:12.5px;margin-top:8px;color:var(--amber);display:none}
+  .msg.show{display:block}
+  a{color:#93c5fd}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+  @media(min-width:620px){ .status{grid-template-columns:repeat(3,1fr)} .wrap{padding-top:28px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <i class="dot"></i>
+    <h1>Qazr 云端远控</h1>
+    <small id="sync">未连接</small>
+  </header>
+
+  <section class="card">
+    <h2>连接</h2>
+    <div class="row">
+      <input id="token" type="password" placeholder="GitHub 令牌（只需 gist 权限）" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="gist" type="text" placeholder="Gist ID" autocomplete="off" spellcheck="false">
+      <button class="primary" id="save">保存并连接</button>
+    </div>
+    <p class="msg" id="msg"></p>
+    <p class="tip">令牌只保存在本机浏览器，仅用于通过 GitHub API 读写你自己的 Gist；离开公共设备时请清除站点数据。</p>
+  </section>
+
+  <section class="card">
+    <h2>当前状态</h2>
+    <div class="status">
+      <div class="kv"><div class="k">玩家</div><div class="v green" id="sPlayer">—</div></div>
+      <div class="kv"><div class="k">服务器</div><div class="v" id="sServer">—</div></div>
+      <div class="kv"><div class="k">坐标</div><div class="v" id="sPos">—</div></div>
+      <div class="kv"><div class="k">血量 / 饥饿</div><div class="v" id="sHp">—</div></div>
+      <div class="kv"><div class="k">开启模块</div><div class="v" id="sActive">—</div></div>
+      <div class="kv"><div class="k">状态更新</div><div class="v" id="sUpdated">—</div></div>
+    </div>
+    <div class="result" id="result">等待指令</div>
+  </section>
+
+  <section class="card">
+    <h2>快捷操作</h2>
+    <div class="grid2">
+      <button class="primary" onclick="preset('afk_on')">开启自动挂机</button>
+      <button class="off" onclick="preset('afk_off')">关闭自动挂机</button>
+      <button onclick="preset('afk_mode_on')">挂机模式（只关渲染）</button>
+      <button onclick="preset('afk_mode_off')">退出挂机模式</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>模块</h2>
+    <div class="row"><input id="filter" placeholder="搜索模块" oninput="renderModules()"></div>
+    <div class="mods" id="mods"><div class="tip">连接后显示</div></div>
+  </section>
+
+  <section class="card">
+    <h2>聊天 / 指令</h2>
+    <div class="row">
+      <input id="chat" placeholder="聊天内容">
+      <button onclick="sayChat()">发送</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="cmd" placeholder="游戏指令（不带 / ）">
+      <button onclick="runCmd()">执行</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>按键</h2>
+    <div class="grid4">
+      <button onclick="tap(87)">W</button>
+      <button onclick="tap(65)">A</button>
+      <button onclick="tap(83)">S</button>
+      <button onclick="tap(68)">D</button>
+      <button onclick="tap(32)">空格</button>
+      <button onclick="tap(256)">Esc</button>
+      <button onclick="tap(257)">Enter</button>
+      <button onclick="tap(340)">Shift</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>日志</h2>
+    <div class="log" id="log"></div>
+    <p class="tip"><a href="index.html">← 返回服务器云端记录</a></p>
+  </section>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var API = 'https://api.github.com/gists/';
+  var FILE = 'qazr-remote.json';
+  var POLL_MS = 4000;
+
+  var tok = '', gid = '', doc = null, loading = false, timer = null;
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function log(x) {
+    var e = $('log');
+    e.textContent += new Date().toLocaleTimeString() + '  ' + x + '\n';
+    e.scrollTop = e.scrollHeight;
+  }
+  function say(msg, bad) {
+    var e = $('msg');
+    e.textContent = msg;
+    e.style.color = bad ? '#fca5a5' : '#fbbf24';
+    e.classList.add('show');
+    setTimeout(function () { e.classList.remove('show'); }, 6000);
+  }
+  function headers() {
+    return { 'Accept': 'application/vnd.github+json', 'Authorization': 'Bearer ' + tok };
+  }
+
+  function load(silent) {
+    if (!tok || !gid || loading) return;
+    loading = true;
+    if (!silent) $('sync').textContent = '读取中…';
+    fetch(API + encodeURIComponent(gid), { headers: headers(), cache: 'no-store' })
+      .then(function (r) {
+        if (r.status === 401) throw new Error('令牌无效或缺少 gist 权限');
+        if (r.status === 404) throw new Error('Gist 不存在，请检查 ID');
+        if (r.status === 403) throw new Error('GitHub API 限流，稍后再试');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (data) {
+        var f = data.files && data.files[FILE];
+        if (!f) throw new Error('Gist 中没有 ' + FILE + '，请先在游戏内开启「Qazr云端远控」模块');
+        if (f.truncated && f.raw_url) {
+          return fetch(f.raw_url, { cache: 'no-store' }).then(function (x) { return x.text(); });
+        }
+        return f.content;
+      })
+      .then(function (content) {
+        doc = JSON.parse(content);
+        render();
+        $('sync').textContent = '已连接 · ' + new Date().toLocaleTimeString();
+        if (!silent) log('已同步状态');
+      })
+      .catch(function (e) {
+        $('sync').textContent = '连接失败';
+        if (!silent) say(e.message, true);
+        log('错误: ' + e.message);
+      })
+      .then(function () { loading = false; });
+  }
+
+  function render() {
+    if (!doc) return;
+    var st = doc.status || {};
+    $('sPlayer').textContent = st.player || '—';
+    $('sServer').textContent = st.server || '—';
+    $('sPos').textContent = st.pos || '—';
+    $('sHp').textContent = (st.health != null ? st.health : '—') + ' / ' + (st.food != null ? st.food : '—');
+    $('sActive').textContent = st.activeCount != null ? st.activeCount + ' 个' : '—';
+    $('sUpdated').textContent = doc.updatedAt ? new Date(doc.updatedAt).toLocaleTimeString() : '—';
+    $('result').textContent = doc.result || '等待指令';
+    renderModules();
+  }
+
+  function renderModules() {
+    var list = (doc && doc.status && doc.status.modules) || [];
+    var q = ($('filter').value || '').toLowerCase();
+    var box = $('mods');
+    if (!list.length) { box.innerHTML = '<div class="tip">暂无模块信息</div>'; return; }
+    var filtered = list.filter(function (m) {
+      return ((m.title || '') + (m.name || '')).toLowerCase().indexOf(q) >= 0;
+    }).sort(function (a, b) { return (b.active ? 1 : 0) - (a.active ? 1 : 0); });
+
+    var html = '';
+    filtered.slice(0, 120).forEach(function (m) {
+      html += '<div class="mod"><span>' + esc(m.title) + '<em>' + esc(m.name) + '</em></span>' +
+        '<button class="' + (m.active ? 'on' : '') + '" onclick="toggleModule(\'' +
+        esc(m.name).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">' +
+        (m.active ? '开' : '关') + '</button></div>';
+    });
+    box.innerHTML = html;
+  }
+
+  function sendCommand(cmd) {
+    if (!tok || !gid) { say('请先填写令牌和 Gist ID', true); return; }
+    var body = { 'files': {} };
+    // 先取最新文档，避免覆盖客户端刚写入的状态
+    fetch(API + encodeURIComponent(gid), { headers: headers(), cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (data) {
+        var f = data.files && data.files[FILE];
+        if (!f) throw new Error('Gist 中没有 ' + FILE);
+        var cur = JSON.parse(f.content);
+        var seq = (cur.seq || 0) + 1;
+        cur.seq = seq;
+        cur.command = cmd;
+        cur.result = '已下发（序号 ' + seq + '），等待客户端执行…';
+        cur.updatedAt = new Date().toISOString();
+        body.files[FILE] = { content: JSON.stringify(cur) };
+        return fetch(API + encodeURIComponent(gid), {
+          method: 'PATCH', headers: headers(), body: JSON.stringify(body)
+        });
+      })
+      .then(function (r) {
+        if (!r.ok) throw new Error('写入失败 HTTP ' + r.status);
+        log('已发送: ' + JSON.stringify(cmd));
+        setTimeout(function () { load(true); }, 1200);
+      })
+      .catch(function (e) { say(e.message, true); log('发送失败: ' + e.message); });
+  }
+
+  window.toggleModule = function (name) { sendCommand({ type: 'toggle', module: name }); };
+  window.preset = function (name) { sendCommand({ type: 'preset', name: name }); };
+  window.sayChat = function () {
+    var v = $('chat').value.trim();
+    if (!v) return;
+    sendCommand({ type: 'say', msg: v });
+    $('chat').value = '';
+  };
+  window.runCmd = function () {
+    var v = $('cmd').value.trim();
+    if (!v) return;
+    sendCommand({ type: 'command', cmd: v });
+    $('cmd').value = '';
+  };
+  window.tap = function (code) { sendCommand({ type: 'key', code: code }); };
+
+  $('save').addEventListener('click', function () {
+    tok = $('token').value.trim();
+    gid = $('gist').value.trim();
+    if (gid.indexOf('gist.github.com') >= 0) gid = gid.split('/').pop().split('?')[0];
+    try {
+      localStorage.setItem('qazr_tok', tok);
+      localStorage.setItem('qazr_gist', gid);
+    } catch (e) {}
+    if (!tok || !gid) { say('令牌和 Gist ID 都要填', true); return; }
+    say('已保存，正在连接…');
+    load(false);
+  });
+
+  // 初始化
+  try {
+    tok = localStorage.getItem('qazr_tok') || '';
+    gid = localStorage.getItem('qazr_gist') || '';
+  } catch (e) {}
+  $('token').value = tok;
+  $('gist').value = gid;
+
+  timer = setInterval(function () {
+    if (document.visibilityState === 'visible') load(true);
+  }, POLL_MS);
+
+  if (tok && gid) load(false);
+  else $('sync').textContent = '待配置';
+})();
+</script>
+</body>
+</html>
