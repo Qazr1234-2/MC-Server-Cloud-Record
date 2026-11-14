@@ -449,6 +449,10 @@
             <button class="btn" data-key="9">Tab</button>
           </div>
         </div>
+        <div class="card" style="margin-top:12px">
+          <div class="k">发送策略</div>
+          <div class="sub" id="queueHint" style="margin-top:6px">连续操作会自动合并为一次写入，减少 GitHub 请求次数</div>
+        </div>
       </section>
 
       <!-- 设置 -->
@@ -620,10 +624,10 @@
     c.className = 'chip' + (mode ? ' ' + mode : '');
     c.innerHTML = '<span class="dot"></span>' + esc(text);
   }
-  function sendCommand(cmd, silent) {
+  function sendNow(cmd, silent) {
     var p = activeProfile();
-    if (!p || !p.token || !p.gist) { toast('请先在「账号」里添加令牌和 Gist ID', 'bad'); return; }
-    fetch(API + encodeURIComponent(p.gist), { headers: headers(p), cache: 'no-store' })
+    if (!p || !p.token || !p.gist) { toast('请先在「客户端」里添加令牌和 Gist ID', 'bad'); return Promise.resolve(); }
+    return fetch(API + encodeURIComponent(p.gist), { headers: headers(p), cache: 'no-store' })
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function (data) {
         var f = data.files && data.files[FILE];
@@ -643,6 +647,53 @@
       })
       .then(function (r) { if (!r.ok) throw new Error('写入失败 HTTP ' + r.status); if (!silent) toast('指令已发送', 'good'); setTimeout(loadDoc, 900); })
       .catch(function (e) { toast(e.message, 'bad'); });
+  }
+
+  // ---------- 指令合并发送（短时间多条合并成一个包） ----------
+  var BATCH_WINDOW = 450;   // 毫秒内产生的指令合并为一次写入
+  var BATCH_MAX = 20;       // 单次最多合并条数
+  var cmdQueue = [];
+  var flushTimer = null;
+  var flushing = false;
+
+  function enqueueCommand(cmd) {
+    // 同一模块的重复开关 / 同一设置项，只保留最后一次，避免来回拨
+    var idx = -1;
+    for (var i = 0; i < cmdQueue.length; i++) {
+      var q = cmdQueue[i];
+      if (cmd.type === 'toggle' && q.type === 'toggle' && q.module === cmd.module) idx = i;
+      if (cmd.type === 'setting' && q.type === 'setting' && q.module === cmd.module && q.setting === cmd.setting) idx = i;
+    }
+    if (idx >= 0) cmdQueue[idx] = cmd; else cmdQueue.push(cmd);
+
+    if (cmdQueue.length >= BATCH_MAX) { flushQueue(); return; }
+    if (flushTimer) clearTimeout(flushTimer);
+    flushTimer = setTimeout(flushQueue, BATCH_WINDOW);
+    updateQueueHint();
+  }
+
+  function updateQueueHint() {
+    var el = $('queueHint');
+    if (!el) return;
+    el.textContent = cmdQueue.length
+      ? ('待合并 ' + cmdQueue.length + ' 条，' + Math.round(BATCH_WINDOW / 100) / 10 + ' 秒内合并为一次写入…')
+      : '连续操作会自动合并为一次写入，减少 GitHub 请求次数';
+  }
+
+  function flushQueue() {
+    if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+    if (flushing) { flushTimer = setTimeout(flushQueue, 200); return; }
+    if (!cmdQueue.length) { updateQueueHint(); return; }
+    var batch = cmdQueue.slice(0, BATCH_MAX);
+    cmdQueue = cmdQueue.slice(batch.length);
+    var payload = batch.length === 1 ? batch[0] : { type: 'batch', list: batch };
+    flushing = true;
+    sendNow(payload, true).then(function () {
+      flushing = false;
+      if (batch.length > 1) toast('已合并发送 ' + batch.length + ' 条指令', 'good');
+      updateQueueHint();
+      if (cmdQueue.length) flushQueue();
+    });
   }
 
   // ---------- 渲染 ----------
@@ -765,7 +816,7 @@
     $('scrim').classList.add('show');
     $('drawer').classList.add('show');
     var token = ++state.settingsToken;
-    sendCommand({ type: 'getsettings', module: mod.name }, true);
+    sendNow({ type: 'getsettings', module: mod.name }, true);
     waitSettings(token, 0);
   }
   function closeDrawer() {
@@ -854,7 +905,7 @@
       e.stopPropagation();
       var name = sw.getAttribute('data-toggle');
       sw.classList.toggle('on');
-      sendCommand({ type: 'toggle', module: name });
+      enqueueCommand({ type: 'toggle', module: name });
       return;
     }
     var row = e.target.closest('.mod-row');
@@ -930,7 +981,7 @@
       var val = sw.getAttribute('data-value') === 'true' ? 'false' : 'true';
       sw.classList.toggle('on');
       sw.setAttribute('data-value', val);
-      sendCommand({ type: 'setting', module: state.selected.name, setting: sw.getAttribute('data-set'), value: val }, true);
+      enqueueCommand({ type: 'setting', module: state.selected.name, setting: sw.getAttribute('data-set'), value: val });
       setTimeout(function () { toast('设置已提交', 'good'); }, 300);
     }
   });
@@ -941,23 +992,23 @@
     if (type === 'bool') return;
     var val = el.value;
     if (type !== 'string' && type !== 'enum' && val === '') return;
-    sendCommand({ type: 'setting', module: state.selected.name, setting: el.getAttribute('data-set'), value: val }, true);
+    enqueueCommand({ type: 'setting', module: state.selected.name, setting: el.getAttribute('data-set'), value: val });
     toast('已设为 ' + val, 'good');
   });
 
   document.querySelectorAll('[data-preset]').forEach(function (b) {
-    b.addEventListener('click', function () { sendCommand({ type: 'preset', name: b.getAttribute('data-preset') }); });
+    b.addEventListener('click', function () { enqueueCommand({ type: 'preset', name: b.getAttribute('data-preset') }); });
   });
   document.querySelectorAll('[data-key]').forEach(function (b) {
-    b.addEventListener('click', function () { sendCommand({ type: 'key', code: parseInt(b.getAttribute('data-key'), 10) }); });
+    b.addEventListener('click', function () { enqueueCommand({ type: 'key', code: parseInt(b.getAttribute('data-key'), 10) }); });
   });
   $('chatSend').addEventListener('click', function () {
     var v = $('chatInput').value.trim(); if (!v) return;
-    sendCommand({ type: 'say', msg: v }); $('chatInput').value = '';
+    enqueueCommand({ type: 'say', msg: v }); $('chatInput').value = '';
   });
   $('cmdSend').addEventListener('click', function () {
     var v = $('cmdInput').value.trim(); if (!v) return;
-    sendCommand({ type: 'command', cmd: v }); $('cmdInput').value = '';
+    enqueueCommand({ type: 'command', cmd: v }); $('cmdInput').value = '';
   });
   $('chatInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('chatSend').click(); });
   $('cmdInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('cmdSend').click(); });
